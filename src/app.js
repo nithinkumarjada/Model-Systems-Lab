@@ -1,29 +1,46 @@
 import {
   DEFAULT_WEIGHTS,
   METRIC_RANGES,
+  buildDecisionMemo,
+  buildExportPayload,
+  compareRankings,
+  explainSystem,
+  formatMetric,
   groupByDomain,
   rankSystems,
+  readinessTier,
   summarizeSystems
 } from "./readiness.mjs";
 
 const state = {
   systems: [],
+  scenarios: [],
+  selectedScenarioId: "balanced",
+  selectedSystemId: null,
   domain: "All",
   stage: "All",
+  search: "",
   maxRisk: 55,
   weights: { ...DEFAULT_WEIGHTS }
 };
 
 const elements = {
+  scenarioFilter: document.querySelector("#scenarioFilter"),
   domainFilter: document.querySelector("#domainFilter"),
   stageFilter: document.querySelector("#stageFilter"),
+  searchInput: document.querySelector("#searchInput"),
   riskLimit: document.querySelector("#riskLimit"),
   riskValue: document.querySelector("#riskValue"),
   resetWeights: document.querySelector("#resetWeights"),
+  copySummary: document.querySelector("#copySummary"),
+  exportJson: document.querySelector("#exportJson"),
   rows: document.querySelector("#systemRows"),
   reviewList: document.querySelector("#reviewList"),
   domainList: document.querySelector("#domainList"),
+  scenarioImpact: document.querySelector("#scenarioImpact"),
+  inspector: document.querySelector("#inspector"),
   statusText: document.querySelector("#statusText"),
+  scenarioText: document.querySelector("#scenarioText"),
   metrics: {
     bestScore: document.querySelector("#bestScore"),
     bestName: document.querySelector("#bestName"),
@@ -37,8 +54,14 @@ const elements = {
 const weightInputs = Array.from(document.querySelectorAll("[data-weight]"));
 
 async function boot() {
-  const response = await fetch("./data/systems.json");
-  state.systems = await response.json();
+  const [systemsResponse, scenariosResponse] = await Promise.all([
+    fetch("./data/systems.json"),
+    fetch("./data/scenarios.json")
+  ]);
+
+  state.systems = await systemsResponse.json();
+  state.scenarios = await scenariosResponse.json();
+  applyScenario(state.scenarios[0], { renderAfter: false });
   hydrateControls();
   bindEvents();
   render();
@@ -48,17 +71,20 @@ function hydrateControls() {
   const domains = ["All", ...new Set(state.systems.map((system) => system.domain))].sort();
   const stages = ["All", ...new Set(state.systems.map((system) => system.stage))].sort();
 
+  elements.scenarioFilter.innerHTML = state.scenarios
+    .map((scenario) => `<option value="${scenario.id}">${scenario.name}</option>`)
+    .join("");
   elements.domainFilter.innerHTML = domains.map((domain) => `<option value="${domain}">${domain}</option>`).join("");
   elements.stageFilter.innerHTML = stages.map((stage) => `<option value="${stage}">${stage}</option>`).join("");
-
-  weightInputs.forEach((input) => {
-    const key = input.dataset.weight;
-    input.value = state.weights[key];
-    document.querySelector(`[data-weight-value="${key}"]`).textContent = formatWeight(state.weights[key]);
-  });
+  updateWeightInputs();
 }
 
 function bindEvents() {
+  elements.scenarioFilter.addEventListener("change", (event) => {
+    const scenario = state.scenarios.find((item) => item.id === event.target.value);
+    applyScenario(scenario);
+  });
+
   elements.domainFilter.addEventListener("change", (event) => {
     state.domain = event.target.value;
     render();
@@ -66,6 +92,11 @@ function bindEvents() {
 
   elements.stageFilter.addEventListener("change", (event) => {
     state.stage = event.target.value;
+    render();
+  });
+
+  elements.searchInput.addEventListener("input", (event) => {
+    state.search = event.target.value.trim().toLowerCase();
     render();
   });
 
@@ -85,16 +116,91 @@ function bindEvents() {
   });
 
   elements.resetWeights.addEventListener("click", () => {
-    state.weights = { ...DEFAULT_WEIGHTS };
-    weightInputs.forEach((input) => {
-      const key = input.dataset.weight;
-      input.value = state.weights[key];
-      document.querySelector(`[data-weight-value="${key}"]`).textContent = formatWeight(state.weights[key]);
-    });
+    const scenario = getActiveScenario();
+    applyScenario(scenario || state.scenarios[0]);
+  });
+
+  elements.rows.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-inspect]");
+    if (!button) {
+      return;
+    }
+
+    state.selectedSystemId = button.dataset.inspect;
     render();
   });
 
+  elements.copySummary.addEventListener("click", async () => {
+    const ranked = getRankedSystems();
+    const summary = summarizeSystems(ranked);
+    const scenario = getActiveScenario();
+    const payload = buildExportPayload(ranked, summary, scenario);
+    const text = [
+      `Scenario: ${scenario?.name || "Custom"}`,
+      `Top system: ${payload.summary.topSystem || "None"}`,
+      `Average score: ${payload.summary.averageScore}`,
+      `Average risk: ${payload.summary.averageRisk}`,
+      `Needs review: ${payload.summary.reviewCount}`
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      elements.statusText.textContent = "Summary copied";
+    } catch {
+      elements.statusText.textContent = "Copy unavailable in this browser";
+    }
+  });
+
+  elements.exportJson.addEventListener("click", () => {
+    const ranked = getRankedSystems();
+    const summary = summarizeSystems(ranked);
+    const payload = buildExportPayload(ranked, summary, getActiveScenario());
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "model-systems-readiness.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  });
+
   window.addEventListener("resize", () => renderMap(getRankedSystems()));
+}
+
+function applyScenario(scenario, options = { renderAfter: true }) {
+  if (!scenario) {
+    return;
+  }
+
+  state.selectedScenarioId = scenario.id;
+  state.weights = { ...scenario.weights };
+  state.maxRisk = scenario.riskLimit;
+
+  if (elements.scenarioFilter) {
+    elements.scenarioFilter.value = scenario.id;
+  }
+  if (elements.riskLimit) {
+    elements.riskLimit.value = scenario.riskLimit;
+    elements.riskValue.textContent = scenario.riskLimit;
+  }
+
+  updateWeightInputs();
+
+  if (options.renderAfter) {
+    render();
+  }
+}
+
+function updateWeightInputs() {
+  weightInputs.forEach((input) => {
+    const key = input.dataset.weight;
+    input.value = state.weights[key] || 0;
+    document.querySelector(`[data-weight-value="${key}"]`).textContent = formatWeight(state.weights[key] || 0);
+  });
+}
+
+function getActiveScenario() {
+  return state.scenarios.find((scenario) => scenario.id === state.selectedScenarioId);
 }
 
 function getFilteredSystems() {
@@ -102,7 +208,13 @@ function getFilteredSystems() {
     const domainMatches = state.domain === "All" || system.domain === state.domain;
     const stageMatches = state.stage === "All" || system.stage === state.stage;
     const riskMatches = system.risk <= state.maxRisk;
-    return domainMatches && stageMatches && riskMatches;
+    const searchMatches =
+      !state.search ||
+      [system.name, system.domain, system.stage, system.owner, system.signal, system.nextAction]
+        .join(" ")
+        .toLowerCase()
+        .includes(state.search);
+    return domainMatches && stageMatches && riskMatches && searchMatches;
   });
 }
 
@@ -114,15 +226,23 @@ function render() {
   const ranked = getRankedSystems();
   const summary = summarizeSystems(ranked);
 
+  if (!ranked.some((system) => system.id === state.selectedSystemId)) {
+    state.selectedSystemId = ranked[0]?.id || null;
+  }
+
   renderMetrics(summary, ranked);
   renderTable(ranked);
   renderReviewQueue(ranked);
   renderDomains(ranked);
+  renderScenarioImpact(ranked);
+  renderInspector(ranked);
   renderMap(ranked);
 }
 
 function renderMetrics(summary, ranked) {
+  const scenario = getActiveScenario();
   elements.statusText.textContent = `${ranked.length} systems visible`;
+  elements.scenarioText.textContent = scenario?.description || "Custom scoring policy";
   elements.metrics.bestScore.textContent = summary.best ? summary.best.score : "0";
   elements.metrics.bestName.textContent = summary.best ? summary.best.name : "No systems";
   elements.metrics.avgScore.textContent = summary.averageScore;
@@ -132,9 +252,12 @@ function renderMetrics(summary, ranked) {
 
 function renderTable(ranked) {
   elements.rows.innerHTML = ranked
-    .map(
-      (system, index) => `
-        <tr>
+    .map((system, index) => {
+      const selected = system.id === state.selectedSystemId ? " selected-row" : "";
+      const tier = readinessTier(system.score);
+
+      return `
+        <tr class="${selected}">
           <td><span class="rank">${index + 1}</span></td>
           <td>
             <strong>${system.name}</strong>
@@ -142,15 +265,17 @@ function renderTable(ranked) {
           </td>
           <td>${system.domain}</td>
           <td>${system.stage}</td>
+          <td><span class="tier ${tier.toLowerCase()}">${tier}</span></td>
           <td>${system.quality}</td>
           <td>${system.reliability}</td>
           <td>${system.latencyMs} ms</td>
           <td>$${system.costPer1k.toFixed(2)}</td>
           <td>${system.risk}</td>
           <td><span class="score-pill">${system.score}</span></td>
+          <td><button class="mini-button" type="button" data-inspect="${system.id}">Inspect</button></td>
         </tr>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -189,6 +314,64 @@ function renderDomains(ranked) {
     .join("");
 }
 
+function renderScenarioImpact(ranked) {
+  const baseline = rankSystems(getFilteredSystems(), DEFAULT_WEIGHTS);
+  const comparison = compareRankings(baseline, ranked).slice(0, 5);
+
+  elements.scenarioImpact.innerHTML = comparison
+    .map((system) => {
+      const direction = system.delta > 0 ? "up" : system.delta < 0 ? "down" : "flat";
+      const deltaLabel = system.delta === 0 ? "0" : `${system.delta > 0 ? "+" : ""}${system.delta}`;
+
+      return `
+        <li>
+          <span>${system.name}</span>
+          <strong class="${direction}">${deltaLabel}</strong>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function renderInspector(ranked) {
+  const selected = ranked.find((system) => system.id === state.selectedSystemId);
+
+  if (!selected) {
+    elements.inspector.innerHTML = `<p class="empty-state">No system selected.</p>`;
+    return;
+  }
+
+  const explanation = explainSystem(selected, state.weights);
+  const memo = buildDecisionMemo(selected, state.weights);
+  const tier = readinessTier(selected.score);
+
+  elements.inspector.innerHTML = `
+    <div class="inspector-header">
+      <div>
+        <span class="tier ${tier.toLowerCase()}">${tier}</span>
+        <h3>${selected.name}</h3>
+        <p>${selected.owner} · ${selected.domain} · ${selected.stage}</p>
+      </div>
+      <strong>${selected.score}</strong>
+    </div>
+    <div class="contribution-list">
+      ${explanation.contributions
+        .map(
+          (item) => `
+            <div class="contribution">
+              <span>${formatMetric(item.metric)} <strong>${item.contribution}</strong></span>
+              <div><i style="width: ${Math.min(item.contribution * 3.2, 100)}%"></i></div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+    <ul class="memo-list">
+      ${memo.map((item) => `<li>${item}</li>`).join("")}
+    </ul>
+  `;
+}
+
 function renderMap(ranked) {
   const canvas = elements.canvas;
   const context = canvas.getContext("2d");
@@ -216,17 +399,30 @@ function renderMap(ranked) {
   }
 
   ranked.forEach((system) => {
-    const x = scale(system.latencyMs, METRIC_RANGES.latencyMs[0], METRIC_RANGES.latencyMs[1], padding.left, padding.left + plotWidth);
-    const y = scale(system.quality, METRIC_RANGES.quality[0], METRIC_RANGES.quality[1], padding.top + plotHeight, padding.top);
+    const x = scale(
+      system.latencyMs,
+      METRIC_RANGES.latencyMs[0],
+      METRIC_RANGES.latencyMs[1],
+      padding.left,
+      padding.left + plotWidth
+    );
+    const y = scale(
+      system.quality,
+      METRIC_RANGES.quality[0],
+      METRIC_RANGES.quality[1],
+      padding.top + plotHeight,
+      padding.top
+    );
     const radius = 7 + system.score / 13;
     const color = colorForStage(system.stage);
+    const selected = system.id === state.selectedSystemId;
 
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
     context.fillStyle = color.fill;
     context.fill();
-    context.lineWidth = 2;
-    context.strokeStyle = color.stroke;
+    context.lineWidth = selected ? 4 : 2;
+    context.strokeStyle = selected ? "#101820" : color.stroke;
     context.stroke();
     context.fillStyle = "#1d242c";
     context.font = "700 11px system-ui, sans-serif";

@@ -7,7 +7,8 @@
   "scripts": {
     "start": "python3 -m http.server 4174",
     "test": "node tests/readiness.test.mjs",
-    "check": "node scripts/check-project.mjs"
+    "check": "node scripts/check-project.mjs",
+    "report": "node scripts/generate-report.mjs"
   },
   "keywords": [
     "model-systems",

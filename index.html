@@ -19,12 +19,22 @@
         </div>
         <div class="actions">
           <a class="button secondary" href="./README.md">Docs</a>
+          <button class="button secondary" id="copySummary" type="button">Copy summary</button>
+          <button class="button secondary" id="exportJson" type="button">Export JSON</button>
           <button class="button" id="resetWeights" type="button">Reset weights</button>
         </div>
       </header>
 
       <main class="layout">
         <aside class="controls" aria-label="Dashboard controls">
+          <label class="control">
+            <span>Scenario</span>
+            <select id="scenarioFilter"></select>
+          </label>
+          <label class="control">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="System, owner, signal">
+          </label>
           <label class="control">
             <span>Domain</span>
             <select id="domainFilter"></select>
@@ -70,7 +80,7 @@
         <section class="workspace">
           <div class="status">
             <span id="statusText">Loading systems</span>
-            <span>Generic model review dashboard</span>
+            <span id="scenarioText">Generic model review dashboard</span>
           </div>
 
           <section class="metrics" aria-label="Summary metrics">
@@ -107,7 +117,7 @@
           <section class="panel">
             <div class="panel-heading">
               <h2>Ranked Systems</h2>
-              <p>Current scoring policy and deployment signals</p>
+              <p>Current scoring policy, tier, and deployment signals</p>
             </div>
             <div class="table-wrap">
               <table>
@@ -117,17 +127,37 @@
                     <th>System</th>
                     <th>Domain</th>
                     <th>Stage</th>
+                    <th>Tier</th>
                     <th>Quality</th>
                     <th>Reliability</th>
                     <th>Latency</th>
                     <th>Cost</th>
                     <th>Risk</th>
                     <th>Score</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="systemRows"></tbody>
               </table>
             </div>
+          </section>
+
+          <section class="analysis-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>System Inspector</h2>
+                <p>Score contribution breakdown and decision memo</p>
+              </div>
+              <div id="inspector" class="inspector"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>Scenario Impact</h2>
+                <p>Rank movement versus balanced readiness</p>
+              </div>
+              <ul id="scenarioImpact" class="impact-list"></ul>
+            </section>
           </section>
 
           <section class="lower-grid">

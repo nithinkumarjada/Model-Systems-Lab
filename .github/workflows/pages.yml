@@ -9,10 +9,14 @@ on:
       - styles.css
       - package.json
       - README.md
+      - CHANGELOG.md
       - data/**
+      - docs/**
       - scripts/**
       - src/**
       - tests/**
+      - .github/ISSUE_TEMPLATE/**
+      - .github/pull_request_template.md
       - .github/workflows/pages.yml
   workflow_dispatch:
 

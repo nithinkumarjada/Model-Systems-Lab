@@ -1,0 +1,58 @@
+[
+  {
+    "id": "balanced",
+    "name": "Balanced readiness",
+    "description": "A neutral operating policy for comparing quality, reliability, delivery cost, and risk.",
+    "riskLimit": 55,
+    "weights": {
+      "quality": 0.28,
+      "reliability": 0.24,
+      "latency": 0.15,
+      "cost": 0.11,
+      "observability": 0.14,
+      "risk": 0.08
+    }
+  },
+  {
+    "id": "production",
+    "name": "Production hardening",
+    "description": "Prioritizes reliability, observability, and low operational risk before launch.",
+    "riskLimit": 35,
+    "weights": {
+      "quality": 0.18,
+      "reliability": 0.31,
+      "latency": 0.1,
+      "cost": 0.06,
+      "observability": 0.23,
+      "risk": 0.12
+    }
+  },
+  {
+    "id": "cost",
+    "name": "Cost control",
+    "description": "Ranks systems for efficiency when serving cost and response time matter most.",
+    "riskLimit": 45,
+    "weights": {
+      "quality": 0.12,
+      "reliability": 0.16,
+      "latency": 0.24,
+      "cost": 0.32,
+      "observability": 0.08,
+      "risk": 0.08
+    }
+  },
+  {
+    "id": "trust",
+    "name": "Trust review",
+    "description": "Highlights candidates with strong monitoring posture and lower governance exposure.",
+    "riskLimit": 30,
+    "weights": {
+      "quality": 0.19,
+      "reliability": 0.2,
+      "latency": 0.08,
+      "cost": 0.06,
+      "observability": 0.29,
+      "risk": 0.18
+    }
+  }
+]

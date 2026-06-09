@@ -63,6 +63,26 @@ export function scoreSystem(system, weights = DEFAULT_WEIGHTS) {
   };
 }
 
+export function explainSystem(system, weights = DEFAULT_WEIGHTS) {
+  const scored = scoreSystem(system, weights);
+  const safeWeights = normalizeWeights(weights);
+
+  const contributions = Object.entries(scored.components)
+    .map(([metric, normalized]) => ({
+      metric,
+      normalized: Number(normalized.toFixed(3)),
+      weight: Number(safeWeights[metric].toFixed(3)),
+      contribution: Number((normalized * safeWeights[metric] * 100).toFixed(1))
+    }))
+    .sort((a, b) => b.contribution - a.contribution);
+
+  return {
+    score: scored.score,
+    components: scored.components,
+    contributions
+  };
+}
+
 export function rankSystems(systems, weights = DEFAULT_WEIGHTS) {
   return systems
     .map((system) => ({ ...system, ...scoreSystem(system, weights) }))
@@ -98,4 +118,97 @@ export function groupByDomain(systems) {
     groups[system.domain] = (groups[system.domain] || 0) + 1;
     return groups;
   }, {});
+}
+
+export function readinessTier(score) {
+  if (score >= 82) {
+    return "Ready";
+  }
+  if (score >= 68) {
+    return "Watch";
+  }
+  if (score >= 52) {
+    return "Review";
+  }
+  return "Hold";
+}
+
+export function compareRankings(baselineSystems, scenarioSystems) {
+  const baselineRanks = new Map(baselineSystems.map((system, index) => [system.id, index + 1]));
+
+  return scenarioSystems.map((system, index) => ({
+    id: system.id,
+    name: system.name,
+    score: system.score,
+    rank: index + 1,
+    delta: (baselineRanks.get(system.id) || scenarioSystems.length + 1) - (index + 1)
+  }));
+}
+
+export function buildDecisionMemo(system, weights = DEFAULT_WEIGHTS) {
+  if (!system) {
+    return [];
+  }
+
+  const explanation = explainSystem(system, weights);
+  const strongest = explanation.contributions[0];
+  const weakest = [...explanation.contributions].reverse()[0];
+  const notes = [
+    `${system.name} is in ${system.stage.toLowerCase()} with a readiness score of ${explanation.score}.`,
+    `Strongest signal: ${formatMetric(strongest.metric)} contributes ${strongest.contribution} points.`,
+    `Watch item: ${formatMetric(weakest.metric)} contributes ${weakest.contribution} points.`
+  ];
+
+  if (system.risk >= 35) {
+    notes.push("Risk is elevated enough to require an explicit owner review before expansion.");
+  }
+
+  if (system.observability < 75) {
+    notes.push("Observability needs stronger telemetry before production decisioning.");
+  }
+
+  return notes;
+}
+
+export function buildExportPayload(rankedSystems, summary, scenario) {
+  return {
+    generatedAt: new Date().toISOString(),
+    scenario: scenario
+      ? {
+          id: scenario.id,
+          name: scenario.name,
+          riskLimit: scenario.riskLimit
+        }
+      : null,
+    summary: {
+      topSystem: summary.best?.name || null,
+      averageScore: summary.averageScore,
+      averageRisk: summary.averageRisk,
+      reviewCount: summary.reviewCount
+    },
+    systems: rankedSystems.map((system, index) => ({
+      rank: index + 1,
+      id: system.id,
+      name: system.name,
+      domain: system.domain,
+      stage: system.stage,
+      score: system.score,
+      tier: readinessTier(system.score),
+      risk: system.risk,
+      nextAction: system.nextAction
+    }))
+  };
+}
+
+export function formatMetric(metric) {
+  const labels = {
+    quality: "Quality",
+    reliability: "Reliability",
+    latency: "Speed",
+    cost: "Cost",
+    observability: "Observability",
+    risk: "Risk"
+  };
+
+  return labels[metric] || metric;
 }
