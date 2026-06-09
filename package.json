@@ -1,0 +1,19 @@
+{
+  "name": "model-systems-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A generic interactive dashboard for comparing model systems and deployment readiness.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 4174",
+    "test": "node tests/readiness.test.mjs",
+    "check": "node scripts/check-project.mjs"
+  },
+  "keywords": [
+    "model-systems",
+    "dashboard",
+    "evaluation",
+    "readiness"
+  ],
+  "license": "MIT"
+}
